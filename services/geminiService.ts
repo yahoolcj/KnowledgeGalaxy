@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { GraphData, AppConfig } from "../types";
+import { GraphData, AppConfig, VendorID } from "../types";
 
 const SYSTEM_INSTRUCTION = `你是一个专业的语义分析助手。请分析提供的文本并提取高质量的知识图谱数据。
 你需要将提取的实体归类为以下具体的“星系类型”：
@@ -26,12 +26,28 @@ const JSON_SCHEMA_PROMPT = `
   ]
 }`;
 
+/**
+ * 根据厂商和用户输入获取最终使用的 API Key
+ * 优先级：用户手动设置 > 环境变量
+ */
+const getEffectiveKey = (vendor: VendorID, userKey: string): string => {
+  if (userKey) return userKey;
+  
+  switch (vendor) {
+    case 'google': return (process.env as any).API_KEY || '';
+    case 'deepseek': return (process.env as any).DEEPSEEK_API_KEY || '';
+    case 'alibaba': return (process.env as any).ALIBABA_API_KEY || '';
+    case 'bytedance': return (process.env as any).BYTEDANCE_API_KEY || '';
+    default: return '';
+  }
+};
+
 export const extractRelationships = async (text: string, config: AppConfig): Promise<GraphData> => {
-  const activeKey = config.apiKey || (config.vendor === 'google' ? process.env.API_KEY : '') || '';
+  const activeKey = getEffectiveKey(config.vendor, config.apiKey);
   const activeModel = config.model;
 
   if (!activeKey) {
-    throw new Error(`请先在设置中配置 ${config.vendor.toUpperCase()} 的 API Key。`);
+    throw new Error(`请先在设置中配置 ${config.vendor.toUpperCase()} 的 API Key 或联系管理员配置环境变量。`);
   }
 
   // 处理 Google Gemini (原生支持 Schema)

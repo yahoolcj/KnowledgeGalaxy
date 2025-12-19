@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { GraphData, GraphNode, ProcessingState, AppConfig, AnalysisLog } from './types';
+import { GraphData, GraphNode, ProcessingState, AppConfig, AnalysisLog, VendorID } from './types';
 import { extractRelationships } from './services/geminiService';
 import GraphView, { GALAXY_COLORS } from './components/GraphView';
 import SettingsModal from './components/SettingsModal';
@@ -27,10 +27,11 @@ const App: React.FC = () => {
         console.error("加载配置失败", e);
       }
     }
+    // 环境变量优先级：环境变量 > 默认硬编码
     return {
-      vendor: 'google',
+      vendor: ((process.env as any).DEFAULT_VENDOR as VendorID) || 'google',
       apiKey: '',
-      model: 'gemini-3-pro-preview'
+      model: (process.env as any).DEFAULT_MODEL || 'gemini-3-pro-preview'
     };
   });
 
@@ -58,7 +59,6 @@ const App: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // 限制大小 (例如 20MB)
     if (file.size > 20 * 1024 * 1024) {
       setProcessing({ status: 'error', progress: 0, message: '文件过大，请上传 20MB 以内的文档。' });
       return;
@@ -119,13 +119,13 @@ const App: React.FC = () => {
 
   return (
     <div className="relative w-screen h-screen bg-black text-white overflow-hidden font-sans select-none">
-      {/* 极简星空叠加层 */}
+      {/* 全局背景装饰 */}
       <div className="fixed inset-0 z-0 pointer-events-none bg-black">
         <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div>
       </div>
 
       <main className="relative z-10 w-full h-full flex flex-col">
-        {/* 页眉 - 移除标题斜体效果 */}
+        {/* 页眉 */}
         <header className="px-8 py-6 flex justify-between items-center border-b border-white/5 bg-black/60 backdrop-blur-2xl">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-indigo-600/90 rounded-2xl flex items-center justify-center shadow-[0_0_20px_rgba(79,70,229,0.4)] rotate-3">
@@ -193,14 +193,13 @@ const App: React.FC = () => {
                     <input type="file" className="hidden" accept=".docx,.txt,.md" onChange={handleFileUpload} />
                   </label>
                   
-                  {!config.apiKey && config.vendor !== 'google' && (
-                    <div className="py-3 px-4 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center justify-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></div>
-                      <p className="text-[11px] text-amber-400 font-bold uppercase tracking-wider">
-                        请先在设置中配置 {config.vendor} API Key
+                  <div className="flex flex-col gap-2">
+                    <div className="py-3 px-4 bg-indigo-500/5 border border-white/5 rounded-xl flex items-center justify-center gap-2">
+                      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">
+                        当前模型: {config.vendor.toUpperCase()} / {config.model}
                       </p>
                     </div>
-                  )}
+                  </div>
                 </div>
               </div>
             </div>
