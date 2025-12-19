@@ -1,66 +1,122 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { GraphData } from "../types";
+import { GraphData, AppConfig } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const SYSTEM_INSTRUCTION = `你是一个专业的语义分析助手。请分析提供的文本并提取高质量的知识图谱数据。
+你需要将提取的实体归类为以下具体的“星系类型”：
+- concept (核心概念/理论)
+- person (人物/角色)
+- location (地理位置)
+- entity (组织/机构/物体)
+- event (关键事件/历史时刻)
+- document (参考资料/文献)
 
-export const extractRelationships = async (text: string): Promise<GraphData> => {
-  // Use gemini-3-pro-preview for complex semantic analysis
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
-    contents: `以下是需要分析的文本内容:\n\n${text.substring(0, 30000)}`,
-    config: {
-      systemInstruction: `你是一个专业的语义分析助手。请分析提供的文本并提取高质量的知识图谱数据。
-      识别关键实体（人物、组织、地点、概念、事件）及其相互联系。
-      输出必须是一个干净的 JSON 对象，包含节点 (nodes) 和连接 (links)。
-      请确保所有提取的内容（名称、描述、关系标签）均使用中文。`,
-      // Thinking budget helps improve the quality of relationship extraction
-      thinkingConfig: { thinkingBudget: 4000 },
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          nodes: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                id: { type: Type.STRING, description: "节点的唯一 ID" },
-                name: { type: Type.STRING, description: "显示名称" },
-                type: { 
-                  type: Type.STRING, 
-                  description: "节点类别 (concept, entity, person, location, event, document)" 
+识别这些实体之间的强关联。
+输出必须是一个干净的 JSON 对象，包含节点 (nodes) 和连接 (links)。
+请确保所有提取的内容（名称、描述、关系标签）均使用中文。`;
+
+const JSON_SCHEMA_PROMPT = `
+请严格按照以下 JSON 格式输出：
+{
+  "nodes": [
+    { "id": "唯一ID", "name": "显示名称", "type": "concept/person/location/entity/event/document", "val": 1-10重要评分, "description": "背景描述" }
+  ],
+  "links": [
+    { "source": "源ID", "target": "目标ID", "label": "关系描述" }
+  ]
+}`;
+
+export const extractRelationships = async (text: string, config: AppConfig): Promise<GraphData> => {
+  const activeKey = config.apiKey || (config.vendor === 'google' ? process.env.API_KEY : '') || '';
+  const activeModel = config.model;
+
+  if (!activeKey) {
+    throw new Error(`请先在设置中配置 ${config.vendor.toUpperCase()} 的 API Key。`);
+  }
+
+  // 处理 Google Gemini (原生支持 Schema)
+  if (config.vendor === 'google') {
+    const ai = new GoogleGenAI({ apiKey: activeKey });
+    const response = await ai.models.generateContent({
+      model: activeModel,
+      contents: `以下是需要分析的文本内容:\n\n${text.substring(0, 30000)}`,
+      config: {
+        systemInstruction: SYSTEM_INSTRUCTION,
+        thinkingConfig: { thinkingBudget: 4000 },
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            nodes: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  name: { type: Type.STRING },
+                  type: { type: Type.STRING },
+                  val: { type: Type.NUMBER },
+                  description: { type: Type.STRING }
                 },
-                val: { type: Type.NUMBER, description: "重要性评分 (1-10)" },
-                description: { type: Type.STRING, description: "关于该节点的简要背景信息" }
-              },
-              required: ["id", "name", "type", "val"]
+                required: ["id", "name", "type", "val"]
+              }
+            },
+            links: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  source: { type: Type.STRING },
+                  target: { type: Type.STRING },
+                  label: { type: Type.STRING }
+                },
+                required: ["source", "target", "label"]
+              }
             }
           },
-          links: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                source: { type: Type.STRING, description: "源节点的 ID" },
-                target: { type: Type.STRING, description: "目标节点的 ID" },
-                label: { type: Type.STRING, description: "关系的性质" }
-              },
-              required: ["source", "target", "label"]
-            }
-          }
-        },
-        required: ["nodes", "links"]
+          required: ["nodes", "links"]
+        }
       }
-    }
+    });
+    return JSON.parse(response.text || '{}');
+  }
+
+  // 处理其他厂商 (OpenAI 兼容接口)
+  let endpoint = '';
+  switch (config.vendor) {
+    case 'deepseek': endpoint = 'https://api.deepseek.com/v1/chat/completions'; break;
+    case 'alibaba': endpoint = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'; break;
+    case 'bytedance': endpoint = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'; break;
+  }
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${activeKey}`
+    },
+    body: JSON.stringify({
+      model: activeModel,
+      messages: [
+        { role: 'system', content: SYSTEM_INSTRUCTION + "\n" + JSON_SCHEMA_PROMPT },
+        { role: 'user', content: text.substring(0, 30000) }
+      ],
+      response_format: { type: 'json_object' }
+    })
   });
 
+  if (!response.ok) {
+    const err = await response.json();
+    throw new Error(err.error?.message || `请求 ${config.vendor} 失败`);
+  }
+
+  const result = await response.json();
+  const content = result.choices[0].message.content;
+  
   try {
-    const textOutput = response.text || '{}';
-    const data = JSON.parse(textOutput);
-    return data as GraphData;
+    return JSON.parse(content);
   } catch (error) {
-    console.error("解析响应失败:", error);
-    throw new Error("知识引擎返回的图表数据无效");
+    console.error("JSON 解析失败:", content);
+    throw new Error("模型返回了无效的 JSON 格式，请重试。");
   }
 };

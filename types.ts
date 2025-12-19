@@ -25,3 +25,21 @@ export interface ProcessingState {
   progress: number;
   message: string;
 }
+
+export type VendorID = 'google' | 'deepseek' | 'alibaba' | 'bytedance';
+
+export interface AppConfig {
+  vendor: VendorID;
+  apiKey: string;
+  model: string;
+}
+
+export interface AnalysisLog {
+  id: string;
+  timestamp: number;
+  filename: string;
+  vendor: VendorID;
+  model: string;
+  status: 'success' | 'error';
+  errorMessage?: string;
+}
